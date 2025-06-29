@@ -1,33 +1,37 @@
 package main
 
-import (
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"net/http"
-	"time"
-)
+import "GO_otus/statistics/settings"
+
+const bytesInGB = 1024 * 1024 * 1024
 
 func main() {
-	testMetric := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "test27",
-		},
-		[]string{"label"},
-	)
-	prometheus.MustRegister(testMetric)
+	//N := 5
+	M := 15
 
-	go func() {
-		for {
-			testMetric.WithLabelValues("value1").Inc()
-			time.Sleep(1 * time.Second)
-		}
-	}()
+	var cpuResults []float64
+	//var sysResults []float64
+	var ramResults []float64
+	var diskResults []float64
+	var netResults []float64
+	for i := 0; i < 4; i++ {
+		cpuMetrics := settings.CpuMetrics(M)
+		cpuResults = append(cpuResults, cpuMetrics)
 
-	http.Handle("/metrics", promhttp.Handler())
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
-		panic(err)
+		//sysMetrics := settings.SysMetrics(cpuMetrics)
+		//sysResults = append(sysResults, sysMetrics)
+
+		ramMetrics := settings.RamMetrics(M)
+		ramResults = append(ramResults, ramMetrics)
+
+		diskMetrics := settings.DiskMetrics(M)
+		diskResults = append(diskResults, diskMetrics)
+
+		netMetrics := settings.NetMetrics(M)
+		netResults = append(netResults, netMetrics)
 	}
+
+	println("CPU Results: \n", cpuResults)
+	//println("System Results: ", sysResults)
 }
 
 //func main() {
