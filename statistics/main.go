@@ -1,107 +1,154 @@
 package main
 
-import "GO_otus/statistics/settings"
-
-const bytesInGB = 1024 * 1024 * 1024
-
-func main() {
-	//N := 5
-	M := 15
-
-	var cpuResults []float64
-	//var sysResults []float64
-	var ramResults []float64
-	var diskResults []float64
-	var netResults []float64
-	for i := 0; i < 4; i++ {
-		cpuMetrics := settings.CpuMetrics(M)
-		cpuResults = append(cpuResults, cpuMetrics)
-
-		//sysMetrics := settings.SysMetrics(cpuMetrics)
-		//sysResults = append(sysResults, sysMetrics)
-
-		ramMetrics := settings.RamMetrics(M)
-		ramResults = append(ramResults, ramMetrics)
-
-		diskMetrics := settings.DiskMetrics(M)
-		diskResults = append(diskResults, diskMetrics)
-
-		netMetrics := settings.NetMetrics(M)
-		netResults = append(netResults, netMetrics)
-	}
-
-	println("CPU Results: \n", cpuResults)
-	//println("System Results: ", sysResults)
-}
+import (
+	"GO_otus/statistics/settings"
+	"encoding/json"
+	"fmt"
+	"math"
+	"sync"
+	"time"
+)
 
 //func main() {
-//os := runtime.GOOS
+//	counter := 0
+//	var arr []int
 //
-//keys := []string{"pc", "os", "bios", "cpu", "ram", "disk", "main", "gru", "net"}
-//titles := map[string]string{
-//	"pc":   "Данные ПК:",
-//	"os":   "Система:",
-//	"bios": "BIOS:",
-//	"cpu":  "Процессор:",
-//	"ram":  "Оперативная память:",
-//	"disk": "HDD/SSD:",
-//	"main": "Материнская плата:",
-//	"gru":  "Видеокарта:",
-//	"net":  "Сетевые настройки:",
-//}
+//	for {
+//		arr = append(arr, counter)
+//		counter++
 //
-//if os == "windows" {
-//	result := settings.GetSystemInfo()
-//	for _, key := range keys {
-//		value, ok := result[key]
-//		if !ok {
-//			continue
+//		if len(arr) > 10 {
+//			arr = arr[len(arr)-5:]
 //		}
-//		fmt.Printf(titles[key] + "\n")
 //
-//		switch systemInfoData := value.(type) {
-//		case string:
-//			fmt.Printf(" - %s\n\n", systemInfoData)
-//		case []map[string]any:
-//			for _, item := range systemInfoData {
-//				for mapKey, mapVal := range item {
-//					if mapKey == "Capacity" || mapKey == "Size" || mapKey == "AdapterRAM" {
-//						memoryInGb := math.Round(mapVal.(float64) / bytesInGB)
-//						fmt.Printf("  - %s: %v GB\n", mapKey, memoryInGb)
-//						continue
-//					}
-//					fmt.Printf("  - %s: %v\n", mapKey, mapVal)
-//				}
-//				fmt.Println()
-//			}
-//		case map[string]any:
-//			for mapKey, mapVal := range systemInfoData {
-//				if mapKey == "Capacity" || mapKey == "Size" || mapKey == "AdapterRAM" {
-//					memoryInGb := math.Round(mapVal.(float64) / bytesInGB)
-//					fmt.Printf("  - %s: %v GB\n", mapKey, memoryInGb)
-//					continue
-//				}
-//				if key == "os" && mapKey == "Caption" {
-//					osName := mapVal.(string)
-//					osName = osName[strings.IndexByte(osName, 'W'):]
-//					fmt.Printf("  - %s: %v\n", mapKey, osName)
-//					continue
-//				}
-//				fmt.Printf("  - %s: %v\n", mapKey, mapVal)
-//			}
-//			fmt.Println()
-//		default:
-//			fmt.Printf("  %v\n\n", systemInfoData)
-//		}
+//		fmt.Println(arr)
+//		time.Sleep(2 * time.Second)
 //	}
 //}
-//
-//if os == "linux" {
-//	fmt.Println(GetAnalyticsLinux())
-//}
-// Создаем метрику
-//}
 
-func prepareSystemData(data map[string]any) {
+func main() {
+	diskNames := []string{"C", "D", "E"}
+	diskStats := make(map[string]map[string][]float64)
+	result := make(map[string]map[string]float64)
+	var cpuStats []float64
+	var mu sync.Mutex
 
+	// Инициализация структур для хранения данных
+	for _, d := range diskNames {
+		diskStats[d] = map[string][]float64{
+			"KBps":             {},
+			"TPS":              {},
+			"UsedPercent":      {},
+			"UsedInodePercent": {},
+		}
+	}
+
+	// Горутина для сбора CPU метрик
+	go func() {
+		for {
+			cpu := settings.CpuMetrics()
+			mu.Lock()
+			cpuStats = append(cpuStats, cpu)
+			mu.Unlock()
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
+	// Горутина для сбора Disk метрик
+	go func() {
+		for {
+			mu.Lock()
+			for _, disk := range diskNames {
+				speed := settings.DiskSpeedMetrics(disk)
+				mem := settings.DiskMemoryMetrics(disk)
+
+				if speed != nil {
+					diskStats[disk]["KBps"] = append(diskStats[disk]["KBps"], speed["KBps"])
+					diskStats[disk]["TPS"] = append(diskStats[disk]["TPS"], speed["TPS"])
+				}
+				if mem != nil {
+					diskStats[disk]["UsedPercent"] = append(
+						diskStats[disk]["UsedPercent"],
+						mem["UsedPercent"])
+					diskStats[disk]["UsedInodePercent"] = append(
+						diskStats[disk]["UsedInodePercent"],
+						mem["UsedInodePercent"])
+				}
+			}
+			mu.Unlock()
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second) // Проверяем каждую секунду
+		defer ticker.Stop()
+
+		for range ticker.C {
+			mu.Lock()
+
+			// Проверяем наличие достаточного количества данных (ваша оригинальная логика)
+			cpuReady := len(cpuStats) == 15 // 15-1 как у вас было
+			diskReady := false
+			for _, disk := range diskNames {
+				for _, values := range diskStats[disk] {
+					if len(values) == 15 { // 15-2 как у вас было
+						diskReady = true
+						break
+					}
+				}
+				if diskReady {
+					break
+				}
+			}
+
+			if cpuReady && diskReady {
+				result["cpu"] = map[string]float64{
+					"cpu_load": prepareAvg(cpuStats),
+				}
+				result["system"] = map[string]float64{
+					"load_average": settings.SysMetrics(result["cpu"]["cpu_load"]),
+				}
+				for _, disk := range diskNames {
+					result[disk] = map[string]float64{
+						"KBps":             prepareAvg(diskStats[disk]["KBps"]),
+						"TPS":              prepareAvg(diskStats[disk]["TPS"]),
+						"UsedPercent":      prepareAvg(diskStats[disk]["UsedPercent"]) * 100,
+						"UsedInodePercent": prepareAvg(diskStats[disk]["UsedInodePercent"]) * 100,
+					}
+				}
+				jsonData, err := json.MarshalIndent(result, "", "  ")
+				if err != nil {
+					fmt.Println("JSON error:", err)
+				} else {
+					fmt.Println(string(jsonData))
+				}
+
+				cpuStats = cpuStats[5:]
+				for _, disk := range diskNames {
+					for key := range diskStats[disk] {
+						diskStats[disk][key] = diskStats[disk][key][5:]
+					}
+				}
+			}
+
+			mu.Unlock()
+		}
+	}()
+
+	// Блокируем main(), чтобы программа не завершилась
+	select {}
+}
+
+func prepareAvg(arr []float64) float64 {
+	if len(arr) < 15 {
+		return 0
+	}
+	var sum float64
+	for i := 0; i < 15; i++ {
+		sum += arr[i]
+	}
+	avg := sum / float64(15)
+
+	return math.Round((avg/100)*100) / 100
 }

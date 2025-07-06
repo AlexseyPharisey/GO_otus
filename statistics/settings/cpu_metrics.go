@@ -6,31 +6,23 @@ import (
 	"strings"
 )
 
-func CpuMetrics(interval int) float64 {
-	count := 0
-	sum := 0
+func CpuMetrics() float64 {
+	cmd := exec.Command(
+		"powershell",
+		"-Command",
+		"Get-WmiObject Win32_Processor | Select-Object -ExpandProperty LoadPercentage",
+	)
 
-	for i := 0; i < 2; i++ {
-		cmd := exec.Command(
-			"powershell",
-			"-Command",
-			"Get-WmiObject Win32_Processor | Select-Object -ExpandProperty LoadPercentage",
-		)
-
-		output, err := cmd.Output()
-		if err != nil {
-			continue
-		}
-
-		loadStr := strings.TrimSpace(string(output))
-		load, err := strconv.Atoi(loadStr)
-		if err != nil {
-			continue
-		}
-
-		sum += load
-		count++
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
 	}
-	avg := float64(sum) / float64(interval)
-	return avg / 100
+
+	loadStr := strings.TrimSpace(string(output))
+	load, err := strconv.Atoi(loadStr)
+	if err != nil {
+		return 0
+	}
+
+	return float64(load)
 }
