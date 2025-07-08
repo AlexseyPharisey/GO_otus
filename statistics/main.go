@@ -9,31 +9,16 @@ import (
 	"time"
 )
 
-//func main() {
-//	counter := 0
-//	var arr []int
-//
-//	for {
-//		arr = append(arr, counter)
-//		counter++
-//
-//		if len(arr) > 10 {
-//			arr = arr[len(arr)-5:]
-//		}
-//
-//		fmt.Println(arr)
-//		time.Sleep(2 * time.Second)
-//	}
-//}
+const N = 5
+const M = 5
 
 func main() {
-	diskNames := []string{"C", "D", "E"}
+	diskNames := settings.GetDiskName()
 	diskStats := make(map[string]map[string][]float64)
 	result := make(map[string]map[string]float64)
 	var cpuStats []float64
 	var mu sync.Mutex
 
-	// Инициализация структур для хранения данных
 	for _, d := range diskNames {
 		diskStats[d] = map[string][]float64{
 			"KBps":             {},
@@ -43,7 +28,6 @@ func main() {
 		}
 	}
 
-	// Горутина для сбора CPU метрик
 	go func() {
 		for {
 			cpu := settings.CpuMetrics()
@@ -54,7 +38,6 @@ func main() {
 		}
 	}()
 
-	// Горутина для сбора Disk метрик
 	go func() {
 		for {
 			mu.Lock()
@@ -81,74 +64,75 @@ func main() {
 	}()
 
 	go func() {
-		ticker := time.NewTicker(1 * time.Second) // Проверяем каждую секунду
-		defer ticker.Stop()
+		outputTicker := time.NewTicker(N * time.Second)
+		defer outputTicker.Stop()
 
-		for range ticker.C {
+		initialized := false
+		for range outputTicker.C {
 			mu.Lock()
 
-			// Проверяем наличие достаточного количества данных (ваша оригинальная логика)
-			cpuReady := len(cpuStats) == 15 // 15-1 как у вас было
-			diskReady := false
-			for _, disk := range diskNames {
-				for _, values := range diskStats[disk] {
-					if len(values) == 15 { // 15-2 как у вас было
-						diskReady = true
+			if !initialized {
+				cpuReady := len(cpuStats) >= M
+				diskReady := len(diskNames) > 0
+
+				for _, disk := range diskNames {
+					if len(diskStats[disk]["KBps"]) < M ||
+						len(diskStats[disk]["TPS"]) < M ||
+						len(diskStats[disk]["UsedPercent"]) < M ||
+						len(diskStats[disk]["UsedInodePercent"]) < M {
+						diskReady = false
 						break
 					}
 				}
-				if diskReady {
-					break
+
+				if !(cpuReady && diskReady) {
+					mu.Unlock()
+					continue
+				}
+				initialized = true
+			}
+
+			result["cpu"] = map[string]float64{
+				"cpu_load": prepareAvg(cpuStats[len(cpuStats)-M:]),
+			}
+
+			result["system"] = map[string]float64{
+				"load_average": settings.SysMetrics(result["cpu"]["cpu_load"]),
+			}
+
+			for _, disk := range diskNames {
+				result[disk] = map[string]float64{
+					"KBps": prepareAvg(diskStats[disk]["KBps"][len(diskStats[disk]["KBps"])-M:]),
+					"TPS":  prepareAvg(diskStats[disk]["TPS"][len(diskStats[disk]["TPS"])-M:]),
+					"UsedPercent": prepareAvg(
+						diskStats[disk]["UsedPercent"][len(diskStats[disk]["UsedPercent"])-M:]) * 100,
+					"UsedInodePercent": prepareAvg(
+						diskStats[disk]["UsedInodePercent"][len(diskStats[disk]["UsedInodePercent"])-M:]) * 100,
 				}
 			}
 
-			if cpuReady && diskReady {
-				result["cpu"] = map[string]float64{
-					"cpu_load": prepareAvg(cpuStats),
-				}
-				result["system"] = map[string]float64{
-					"load_average": settings.SysMetrics(result["cpu"]["cpu_load"]),
-				}
-				for _, disk := range diskNames {
-					result[disk] = map[string]float64{
-						"KBps":             prepareAvg(diskStats[disk]["KBps"]),
-						"TPS":              prepareAvg(diskStats[disk]["TPS"]),
-						"UsedPercent":      prepareAvg(diskStats[disk]["UsedPercent"]) * 100,
-						"UsedInodePercent": prepareAvg(diskStats[disk]["UsedInodePercent"]) * 100,
-					}
-				}
-				jsonData, err := json.MarshalIndent(result, "", "  ")
-				if err != nil {
-					fmt.Println("JSON error:", err)
-				} else {
-					fmt.Println(string(jsonData))
-				}
-
-				cpuStats = cpuStats[5:]
-				for _, disk := range diskNames {
-					for key := range diskStats[disk] {
-						diskStats[disk][key] = diskStats[disk][key][5:]
-					}
-				}
+			jsonData, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				fmt.Println("JSON error:", err)
+			} else {
+				fmt.Println(string(jsonData))
 			}
-
 			mu.Unlock()
 		}
 	}()
 
-	// Блокируем main(), чтобы программа не завершилась
 	select {}
 }
 
 func prepareAvg(arr []float64) float64 {
-	if len(arr) < 15 {
+	if len(arr) < M {
 		return 0
 	}
 	var sum float64
-	for i := 0; i < 15; i++ {
+	for i := 0; i < M; i++ {
 		sum += arr[i]
 	}
-	avg := sum / float64(15)
+	avg := sum / float64(M)
 
 	return math.Round((avg/100)*100) / 100
 }

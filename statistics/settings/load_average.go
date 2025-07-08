@@ -9,11 +9,8 @@ import (
 
 func SysMetrics(cpuMetric float64) float64 {
 	cores := getCoreCount()
-	threads := getActiveThreads()
-
-	normalizedCpuLoad := cpuMetric / (100 * cores)
-	normalizedQueue := math.Max(0, threads-cores) / cores
-	loadAverage := normalizedCpuLoad + normalizedQueue*0.7
+	queue := getQueue()
+	loadAverage := (cpuMetric / 100) * (1 + queue/cores)
 
 	return math.Round(loadAverage*100) / 100
 }
@@ -39,11 +36,11 @@ func getCoreCount() float64 {
 	return float64(outputInt)
 }
 
-func getActiveThreads() float64 {
+func getQueue() float64 {
 	cmd := exec.Command(
 		"powershell",
 		"-Command",
-		"(Get-Process | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum",
+		"(Get-CimInstance Win32_PerfFormattedData_PerfOS_System).ProcessorQueueLength",
 	)
 
 	output, err := cmd.Output()
